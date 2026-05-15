@@ -13,7 +13,9 @@ export interface FileMetadata {
     created_at: string;        // ISO datetime string
     type: "local_csv";          // extend union later: | "google_sheet" | "rest_api"
     primary_column_name: string;
+    descriptor_column_name: string;
     alias2column: Record<string, string>;  // { alias: column, ... }
+    column_names: string[];  // including the primary_column_name
 }
 
 export interface Form {

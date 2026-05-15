@@ -3,46 +3,47 @@ import { db } from '../db';
 
 console.log("[Background Worker] Booting up Global NoSQL Engine...");
 
-const dummy_file_metadata = {
-    fileId: uuidv7(),
-    source_name: "customers_2024.csv",
-    created_at: new Date().toLocaleString(),
-    type: "local_csv" as const,
-    primary_column_name: "email",
-    alias2column: {
-        "#name": "ismin ne",
-        "#age": "kac yasindasin?"
-    }
-}
+// const dummy_file_metadata = {
+//     fileId: uuidv7(),
+//     source_name: "customers_2024.csv",
+//     created_at: new Date().toLocaleString(),
+//     type: "local_csv" as const,
+//     primary_column_name: "email adresiniz",
+//     descriptor_column_name: "ismin ne"
+//     alias2column: {
+//         "#name": "ismin ne",
+//         "#age": "kac yasindasin?"
+//     }
+// }
 
-const dummy_file_row = {
-    fileId: dummy_file_metadata.fileId,
-    primary_key_value: "erkantare@gmail.com",
-    "email adresiniz": "erkantare@gmail.com",
-    "ismin ne": "erkan",
-    "kac yasindasin?": "26",
-    "nerelisin": "ankara"
-};
+// const dummy_file_row = {
+//     fileId: dummy_file_metadata.fileId,
+//     primary_key_value: "erkantare@gmail.com",
+//     "email adresiniz": "erkantare@gmail.com",
+//     "ismin ne": "erkan",
+//     "kac yasindasin?": "26",
+//     "nerelisin": "ankara"
+// };
 
-const dummy_settings = {
-    active_file_id: dummy_file_row.fileId,
-    active_profile: dummy_file_row.primary_key_value,
-    detected_form: ''
-}
+// const dummy_settings = {
+//     active_file_id: dummy_file_row.fileId,
+//     active_profile: dummy_file_row.primary_key_value,
+//     detected_form: ''
+// }
 
-// test function -- delete later
-async function seedDatabase() {
-    db.file_rows.clear();
-    db.file_metadata.clear();
-    // Check if we already have data to avoid infinite duplicates
-    const count = await db.file_rows.count();
-    if (count === 0) {
-        await db.file_rows.add(dummy_file_row);
-        await db.file_metadata.add(dummy_file_metadata);
-        console.log("[DB] Seeded database with dummy row");
-    }
-}
-seedDatabase();
+// // test function -- delete later
+// async function seedDatabase() {
+//     db.file_rows.clear();
+//     db.file_metadata.clear();
+//     // Check if we already have data to avoid infinite duplicates
+//     const count = await db.file_rows.count();
+//     if (count === 0) {
+//         await db.file_rows.add(dummy_file_row);
+//         await db.file_metadata.add(dummy_file_metadata);
+//         console.log("[DB] Seeded database with dummy row");
+//     }
+// }
+// seedDatabase();
 
 // 2. Establish the Message Listener (The REST-like API)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -55,14 +56,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             const origin = new URL(sender.tab!.url!).origin;
             const form = await db.forms.get(origin);
-            if (!(form && form.fields[request.selector])) return; // form doesn exist or selector not found -> nothing to do
-            dummy_settings.detected_form = origin;
-            
-            const profile = await db.file_rows.where('[fileId+primary_key_value]').equals([dummy_settings.active_file_id, request.profile]).first();
+            if (!(form && form.fields[request.selector])) {
+                console.log("Nothing found to autofill.");
+                return; // form doesn exist or selector not found -> nothing to do
+            }
+            // dummy_settings.detected_form = origin;
 
+            const activeFileId = (await chrome.storage.local.get('activeFileId')).activeFileId;
+
+            const profile = await db.file_rows.where('[fileId+primary_key_value]').equals([activeFileId, request.profile]).first();
+            console.log(profile)
+            console.log(form)
             if (form && profile) {
                 const getAutofill = async (selector: string) => {
                     const selector_value = form.fields[selector];
+                    console.log(selector_value)
                     if (selector_value) {
                         if (selector_value.is_hardcoded) {
                             return selector_value.autofill_value;
@@ -101,7 +109,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // message listener cant be async -> use IIFE pattern
         (async () => {
         const origin = new URL(sender.tab!.url!).origin;
-        dummy_settings.detected_form = origin;
+        // dummy_settings.detected_form = origin;
         const existing = await db.forms.get(origin);
         
         if (existing) {
@@ -141,7 +149,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "DELETE_SELECTOR") {
         (async () => {
             const origin = new URL(sender.tab!.url!).origin;
-            dummy_settings.detected_form = origin;
+            // dummy_settings.detected_form = origin;
             const existing = await db.forms.get(origin);
 
             if (existing) {

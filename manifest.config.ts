@@ -18,6 +18,11 @@ export default defineManifest({
         type: "module"
     },
 
+    options_ui: {
+        page: "src/options/index.html",
+        open_in_tab: true
+    },
+
     // 2. Ask for permission to use the local hard drive
     permissions: [
         "storage"
