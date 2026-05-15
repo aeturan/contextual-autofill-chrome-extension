@@ -19,6 +19,10 @@ const AliasInputRow = ({
 }) => {
     const [value, setValue] = useState(initialAlias);
 
+    useEffect(() => {
+        setValue(initialAlias);
+    }, [initialAlias]);
+
     const handleBlur = async () => {
         const newAlias = value.trim();
         const oldAlias = initialAlias.trim();
@@ -407,7 +411,7 @@ export const Options = () => {
                                 
                                 return activeFileMetadata.column_names.map(colName => (
                                     <AliasInputRow 
-                                        key={colName}
+                                        key={`${activeFileMetadata.fileId}-${colName}`}
                                         columnName={colName}
                                         initialAlias={colToAliasMap[colName] || ""}
                                         fileId={activeFileMetadata.fileId}
