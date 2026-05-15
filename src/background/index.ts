@@ -3,52 +3,9 @@ import { db } from '../db';
 
 console.log("[Background Worker] Booting up Global NoSQL Engine...");
 
-// const dummy_file_metadata = {
-//     fileId: uuidv7(),
-//     source_name: "customers_2024.csv",
-//     created_at: new Date().toLocaleString(),
-//     type: "local_csv" as const,
-//     primary_column_name: "email adresiniz",
-//     descriptor_column_name: "ismin ne"
-//     alias2column: {
-//         "#name": "ismin ne",
-//         "#age": "kac yasindasin?"
-//     }
-// }
 
-// const dummy_file_row = {
-//     fileId: dummy_file_metadata.fileId,
-//     primary_key_value: "erkantare@gmail.com",
-//     "email adresiniz": "erkantare@gmail.com",
-//     "ismin ne": "erkan",
-//     "kac yasindasin?": "26",
-//     "nerelisin": "ankara"
-// };
-
-// const dummy_settings = {
-//     active_file_id: dummy_file_row.fileId,
-//     active_profile: dummy_file_row.primary_key_value,
-//     detected_form: ''
-// }
-
-// // test function -- delete later
-// async function seedDatabase() {
-//     db.file_rows.clear();
-//     db.file_metadata.clear();
-//     // Check if we already have data to avoid infinite duplicates
-//     const count = await db.file_rows.count();
-//     if (count === 0) {
-//         await db.file_rows.add(dummy_file_row);
-//         await db.file_metadata.add(dummy_file_metadata);
-//         console.log("[DB] Seeded database with dummy row");
-//     }
-// }
-// seedDatabase();
-
-// 2. Establish the Message Listener (The REST-like API)
+// Establish the Message Listener (The REST-like API)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-
-
 
     if (request.action === "AUTOFILL") {
 
@@ -91,8 +48,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 } else if (request.param === 'all') {
                     const selector_list: {selector: string; value: string | undefined}[] = [];
                     for (const selector of Object.keys(form.fields)) {
-                        selector_list.push({selector: selector, value: await getAutofill(request.selector)})
+                        selector_list.push({selector: selector, value: await getAutofill(selector)})
                     }
+                    console.log(selector_list)
                     sendResponse({ok: true, payload: selector_list})
                 }
             }
@@ -100,9 +58,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         // CRITICAL: Return true to tell Chrome this is an asynchronous response
         return true; 
-
-
-
 
 
     } else if (request.action === "SET_SELECTOR") {
@@ -142,10 +97,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; 
 
 
-
-
-
-
     } else if (request.action === "DELETE_SELECTOR") {
         (async () => {
             const origin = new URL(sender.tab!.url!).origin;
@@ -159,10 +110,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ ok: true })
         })();
         return true;
-    
-    
-    
-    
+
+
+    } else if (request.action === "HAS_SELECTOR") {
+        (async () => {
+            const origin = new URL(sender.tab!.url!).origin;
+            const form = await db.forms.get(origin);
+            if (!(form && form.fields[request.selector])) {
+                // form doesn exist or selector not found -> nothing to do
+                sendResponse({ ok: true, has_selector: false})
+            } else {
+                sendResponse({ ok: true, has_selector: true});
+            }
+        })();
+        return true;
     }
 })
 

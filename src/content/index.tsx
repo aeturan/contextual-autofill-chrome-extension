@@ -1,4 +1,7 @@
-console.log("Tracer Bullet: Content Script Injected Successfully");
+import { renderBubble, removeBubble, isInsideBubble } from './bubble';
+import type { FormElement } from './bubble';
+
+console.log("Content Script Injected Successfully");
 
 // creates the CSS Selector -> walks backward up the HTML tree.
 function getDomPath(el: HTMLElement | null): string {
@@ -86,58 +89,65 @@ document.addEventListener('click', async (event: MouseEvent) => {
         return;
     }
 
+
+
     // ROUTE C: "Autofill" Intent (Standard Click)
-    chrome.runtime.sendMessage({
-        action: "AUTOFILL",
-        param: "single", // single (target field) or all (fields on the page)
-        selector: exactCoordinate,
-        profile: "erkantare@gmail.com" // todo - chrome.storage.session.get(...)
-    }, (response) => {
-        console.log("Autofill Response")
-        console.log(response);
-        if (response && response.ok && response.payload) {
-            for (const {selector, value} of response.payload) {
-                const input_field = document.querySelector(selector) as FormElement;
-                input_field.value = value;
-                
-                const eventName = target.tagName === 'INPUT' ? 'input' : 'change'; // both INPUT and TEXTAREA use input.
-                formElement.dispatchEvent(new Event(eventName, { bubbles: true }));
-                
-                formElement.style.backgroundColor = "#b2dfdb"; // green
-                console.log(`[AUTOFILLED] Pulled "${value}" from Dexie NoSQL!`);
-                setTimeout(() => formElement.style.background = "", 1000)
-            }
-        }
-    })
+    const storageResult = await chrome.storage.local.get('activeProfileKey');
+    const activeProfile = storageResult.activeProfileKey;
+    const profileHint = activeProfile || "Unknown Profile";
 
-    // chrome.storage.local.get(exactCoordinate, async (result) => { // a result object containing the key-value pair
-    //     const semanticKey = result[exactCoordinate]; // e.g., "first_name"
-
-    //     if (semanticKey && typeof semanticKey === 'string') {// If it returns undefined (no match for exactCoordinate in DB), the user just clicked a random, untracked text box, and we do nothing.
-
-    //         // NEW: Request the data from the Background Worker instead of local Dexie
-    //         console.log(`[NETWORK] Requesting profile for "Alice" from Background Worker...`);
-
-    //         chrome.runtime.sendMessage({ action: "GET_PROFILE", payload: "Alice" }, (response) => {
-    //             if (response && response.success && response.data) {
-    //                 const activeRow = response.data;
-    //                 const injectionValue = activeRow.data[semanticKey]
-
-    //                 if (injectionValue) {
-    //                     formElement.value = injectionValue;
-    //                     const eventName = target.tagName === 'INPUT' ? 'input' : 'change'; // both INPUT and TEXTAREA use input.
-    //                     // The Virtual DOM Hack - simulating actual click - so react, angular etc. will notice
-    //                     formElement.dispatchEvent(new Event(eventName, { bubbles: true }));
+    // 1. Create a reusable function to handle the API call
+    const executeAutofill = (mode: "single" | "all") => {
+        chrome.runtime.sendMessage({
+            action: "AUTOFILL",
+            param: mode, // <--- Now it dynamically uses 'single' or 'all'
+            selector: exactCoordinate,
+            profile: activeProfile 
+        }, (response) => {
+            console.log(`Autofill Response (${mode})`, response);
+            if (response && response.ok && response.payload) {
+                for (const {selector, value} of response.payload) {
+                    const input_field = document.querySelector(selector) as FormElement;
+                    if (input_field) {
+                        input_field.value = value;
                         
-    //                     formElement.style.backgroundColor = "#b2dfdb"; // green
-    //                     console.log(`[AUTOFILLED] Pulled "${injectionValue}" from Dexie NoSQL!`);
-    //                     setTimeout(() => formElement.style.background = "", 1000)
-    //                 }
-    //             } else {
-    //                 console.error("[NETWORK ERROR] Failed to fetch from Background Worker.");
-    //             }
-    //         });
-    //     }
-    // })
+                        const eventName = input_field.tagName === 'INPUT' ? 'input' : 'change';
+                        input_field.dispatchEvent(new Event(eventName, { bubbles: true }));
+                        
+                        input_field.style.backgroundColor = "#b2dfdb"; 
+                        console.log(`[AUTOFILLED] Pulled "${value}"!`);
+                        setTimeout(() => input_field.style.backgroundColor = "", 1000);
+                    }
+                }
+            }
+        });
+    };
+
+    // render bubble only if selector is tracked
+    chrome.runtime.sendMessage({
+            action: "HAS_SELECTOR",
+            selector: exactCoordinate
+        }, (response) => {
+                if (response && response.ok && response.has_selector) {
+                    // 2. Pass the helper function into the Bubble
+                    renderBubble(
+                        formElement, 
+                        profileHint, 
+                        
+                        // CALLBACK 1: onAutofillThis
+                        () => {
+                            console.log("Triggering Single Autofill...");
+                            executeAutofill("single");
+                        },
+
+                        // CALLBACK 2: onAutofillAll
+                        () => {
+                            console.log("Triggering Global Autofill...");
+                            executeAutofill("all");
+                        }
+                    );
+                }
+    });
+    
 }, { capture: true });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
 import { db } from '../db';
 import type { FileMetadata, FileRow } from '../db';
@@ -23,30 +23,24 @@ const AliasInputRow = ({
         const newAlias = value.trim();
         const oldAlias = initialAlias.trim();
 
-        // If nothing changed, do nothing.
         if (newAlias === oldAlias) return;
 
-        // Fetch the active metadata document
         const metadata = await db.file_metadata.get(fileId);
         if (!metadata) return;
 
         const updatedAliasMap = { ...metadata.alias2column };
 
-        // 1. If there was an old alias, delete it from the map
         if (oldAlias !== "") {
             delete updatedAliasMap[oldAlias];
         }
 
-        // 2. If the new value isn't empty, add the new alias mapping
         if (newAlias !== "") {
             updatedAliasMap[newAlias] = columnName;
         }
 
-        // 3. Save back to Dexie
         await db.file_metadata.update(fileId, { alias2column: updatedAliasMap });
         console.log(`[DB] Updated mapping for ${columnName}: "${oldAlias}" -> "${newAlias}"`);
         
-        // 4. Tell parent to re-fetch metadata so the UI stays in sync
         onAliasUpdated();
     };
 
@@ -77,6 +71,10 @@ export const Options = () => {
     const [files, setFiles] = useState<FileMetadata[]>([]);
     const [activeFileId, setActiveFileId] = useState<string | null>(null);
     const [activeFileMetadata, setActiveFileMetadata] = useState<FileMetadata | null>(null);
+    
+    // --- Lean Profile State ---
+    const [activeProfileKey, setActiveProfileKey] = useState<string | null>(null);
+    const [profileOptions, setProfileOptions] = useState<{key: string, label: string}[]>([]);
 
     // --- Modal State ---
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -85,7 +83,7 @@ export const Options = () => {
     const [columns, setColumns] = useState<string[]>([]);
     const [uploadFilename, setUploadFilename] = useState("");
     
-    // Form selections inside Modal
+    // --- Modal Selections ---
     const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
     const [selectedDescriptorKey, setSelectedDescriptorKey] = useState("");
     const [selectedSyncFileId, setSelectedSyncFileId] = useState("");
@@ -94,11 +92,8 @@ export const Options = () => {
     // LIFECYCLE & DATA FETCHING
     // ============================================================================
     
-    // 1. Load initial data on boot
     useEffect(() => {
         refreshFileList();
-        
-        // Restore last active file from chrome.storage
         chrome.storage.local.get(["activeFileId"], (result) => {
             if (result.activeFileId) {
                 setActiveFileId(result.activeFileId);
@@ -106,17 +101,53 @@ export const Options = () => {
         });
     }, []);
 
-    // 2. Whenever activeFileId changes, fetch its metadata and save to chrome storage
     useEffect(() => {
         if (!activeFileId) {
             setActiveFileMetadata(null);
+            setProfileOptions([]);
+            setActiveProfileKey(null);
             return;
         }
 
         chrome.storage.local.set({ activeFileId: activeFileId });
         
-        db.file_metadata.get(activeFileId).then(metadata => {
+        Promise.all([
+            db.file_metadata.get(activeFileId),
+            db.file_rows.where('fileId').equals(activeFileId).toArray()
+        ]).then(([metadata, rows]) => {
             setActiveFileMetadata(metadata || null);
+
+            if (metadata && rows.length > 0) {
+                // Lean Memory mapping for the UI
+                const minimalOptions = rows.map(row => ({
+                    key: row.primary_key_value,
+                    label: row[metadata.descriptor_column_name]
+                }));
+                
+                setProfileOptions(minimalOptions);
+
+                // Ask local storage first for the default value of profile
+                chrome.storage.local.get(["activeProfileKey"], (result) => {
+                    const storedKey = result.activeProfileKey;
+                    
+                    // Check if the stored key actually belongs to the current file's rows
+                    const isValidStoredKey = minimalOptions.some(opt => opt.key === storedKey);
+
+                    if (isValidStoredKey) {
+                        // 1. Source of Truth: Obey local storage
+                        setActiveProfileKey(storedKey);
+                    } else {
+                        // 2. Data Source Changed OR Storage is Empty: Dictate the first row
+                        const firstKey = minimalOptions[0].key;
+                        setActiveProfileKey(firstKey);
+                        chrome.storage.local.set({ activeProfileKey: firstKey });
+                    }
+                });
+            } else {
+                setProfileOptions([]);
+                setActiveProfileKey(null);
+                chrome.storage.local.remove(["activeProfileKey"]);
+            }
         });
     }, [activeFileId]);
 
@@ -126,7 +157,7 @@ export const Options = () => {
     };
 
     // ============================================================================
-    // MODAL: File Parsing (PapaParse)
+    // MODAL: File Parsing
     // ============================================================================
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -145,7 +176,6 @@ export const Options = () => {
                     setColumns(colNames);
                     setParsedRows(rawRows);
                     
-                    // Smart defaults
                     setSelectedPrimaryKey(colNames[0] || "");
                     setSelectedDescriptorKey(colNames[1] || colNames[0] || "");
                 }
@@ -169,13 +199,10 @@ export const Options = () => {
 
         const newFileId = `file_${crypto.randomUUID()}`;
         
-        // Handle Alias Syncing Logic
         let startingAliases: Record<string, string> = {};
         if (selectedSyncFileId) {
             const syncSource = await db.file_metadata.get(selectedSyncFileId);
             if (syncSource) {
-                // Iterate through the older file's aliases.
-                // If the new file also has that column name, copy the mapping over.
                 for (const [alias, columnName] of Object.entries(syncSource.alias2column)) {
                     if (columns.includes(columnName)) {
                         startingAliases[alias] = columnName;
@@ -184,7 +211,6 @@ export const Options = () => {
             }
         }
 
-        // 1. Build Metadata Object
         const newMetadata: FileMetadata = {
             fileId: newFileId,
             source_name: uploadFilename,
@@ -196,26 +222,23 @@ export const Options = () => {
             column_names: columns
         };
 
-        // 2. Build Row Objects
         const newRows: FileRow[] = parsedRows.map(row => ({
             fileId: newFileId,
             primary_key_value: row[selectedPrimaryKey],
-            ...row // Splat all columns directly into the object as requested
+            ...row 
         }));
 
         try {
-            // Write to database
             await db.file_metadata.add(newMetadata);
             await db.file_rows.bulkAdd(newRows);
             
             console.log(`[DB] Successfully imported ${uploadFilename}`);
             
-            // Cleanup UI
             setIsModalOpen(false);
             setParsedRows([]);
             setColumns([]);
             await refreshFileList();
-            setActiveFileId(newFileId); // Auto-select the newly uploaded file
+            setActiveFileId(newFileId); 
 
         } catch (error) {
             console.error("Database Write Error:", error);
@@ -227,21 +250,17 @@ export const Options = () => {
     // HOME SCREEN: Deletion Logic
     // ============================================================================
     const handleDeleteFile = async (targetFileId: string, e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevent the dropdown from toggling when clicking the X
+        e.stopPropagation(); 
         
         if (!confirm("Are you sure you want to delete this file and all its data?")) return;
 
         try {
-            // Delete metadata
             await db.file_metadata.delete(targetFileId);
-            // Delete all rows matching this fileId using the index
             await db.file_rows.where('fileId').equals(targetFileId).delete();
             
             console.log(`[DB] Deleted file ${targetFileId}`);
-            
             await refreshFileList();
             
-            // If we deleted the currently active file, clear the view
             if (activeFileId === targetFileId) {
                 setActiveFileId(null);
                 setActiveFileMetadata(null);
@@ -252,11 +271,6 @@ export const Options = () => {
         }
     };
 
-    // ============================================================================
-    // HELPER: The Reverse-Lookup Alias Builder
-    // ============================================================================
-    // Input: { "first_name": "Name", "company": "Organization" }
-    // Output: { "Name": "first_name", "Organization": "company" }
     const getColumnToAliasMap = (metadata: FileMetadata) => {
         const colToAlias: Record<string, string> = {};
         for (const [alias, column] of Object.entries(metadata.alias2column)) {
@@ -265,7 +279,12 @@ export const Options = () => {
         return colToAlias;
     };
 
-    const sortedFiles = files.toSorted((a, b) => { // sort by date (descending) for dropdowns
+    // ============================================================================
+    // RENDER PREPARATION
+    // ============================================================================
+    
+    // Sort files by newest first (avoiding strict-mode TS date arithmetic errors)
+    const sortedFiles = [...files].sort((a, b) => {
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
@@ -292,7 +311,7 @@ export const Options = () => {
                     Active Data Source
                 </label>
                 
-                {files.length === 0 ? (
+                {sortedFiles.length === 0 ? (
                     <div style={{ color: '#888', fontStyle: 'italic' }}>No files uploaded yet.</div>
                 ) : (
                     <select 
@@ -307,41 +326,65 @@ export const Options = () => {
                                 <option key={f.fileId} value={f.fileId}>
                                     {f.source_name} ({formattedDate})
                                 </option>
-                            )
+                            );
                         })}
                     </select>
                 )}
 
-                {/* Simulated Custom Dropdown Items for the Delete / Info Buttons */}
-                {/* Note: Native <select> tags cannot hold buttons. For a perfect UX matching your spec, 
-                    we render the list of files directly below the native selector as a "management list" */}
-                {files.length > 0 && (
+                {sortedFiles.length > 0 && (
                     <div style={{ marginTop: '15px', borderTop: '1px solid #eee', paddingTop: '15px' }}>
                         <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px', textTransform: 'uppercase' }}>Manage Databases</div>
-                        {files.map(f => (
-                            <div key={f.fileId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
-                                <span style={{ fontSize: '14px', color: f.fileId === activeFileId ? '#2196F3' : '#333', fontWeight: f.fileId === activeFileId ? 'bold' : 'normal' }}>
-                                    {f.source_name}
-                                </span>
-                                <div>
-                                    <button 
-                                        onClick={() => alert(JSON.stringify(f, null, 2))}
-                                        style={{ background: 'none', border: '1px solid #ccc', borderRadius: '4px', padding: '4px 8px', marginRight: '8px', cursor: 'pointer', fontSize: '12px' }}
-                                    >
-                                        (i) Debug
-                                    </button>
-                                    <button 
-                                        onClick={(e) => handleDeleteFile(f.fileId, e)}
-                                        style={{ background: '#ff5252', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px' }}
-                                    >
-                                        (x) Delete
-                                    </button>
+                        {sortedFiles.map(f => {
+                            const formattedDate = new Date(f.created_at).toLocaleString();
+                            return (
+                                <div key={f.fileId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
+                                    <span style={{ fontSize: '14px', color: f.fileId === activeFileId ? '#2196F3' : '#333', fontWeight: f.fileId === activeFileId ? 'bold' : 'normal' }}>
+                                        {f.source_name} <span style={{color: '#999', fontSize: '12px'}}>({formattedDate})</span>
+                                    </span>
+                                    <div>
+                                        <button 
+                                            onClick={() => alert(JSON.stringify(f, null, 2))}
+                                            style={{ background: 'none', border: '1px solid #ccc', borderRadius: '4px', padding: '4px 8px', marginRight: '8px', cursor: 'pointer', fontSize: '12px' }}
+                                        >
+                                            (i) Debug
+                                        </button>
+                                        <button 
+                                            onClick={(e) => handleDeleteFile(f.fileId, e)}
+                                            style={{ background: '#ff5252', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px' }}
+                                        >
+                                            (x) Delete
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
+
+            {/* --- HOME SCREEN: The Active Profile Selector --- */}
+            {activeFileMetadata && profileOptions.length > 0 && (
+                <div style={{ marginBottom: '30px', backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                    <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#555' }}>
+                        Active Profile
+                    </label>
+                    <select 
+                        value={activeProfileKey || ""} 
+                        onChange={(e) => {
+                            const newKey = e.target.value;
+                            setActiveProfileKey(newKey);
+                            chrome.storage.local.set({ activeProfileKey: newKey });
+                        }}
+                        style={{ width: '100%', padding: '10px', fontSize: '16px', borderRadius: '4px', border: '1px solid #ccc' }}
+                    >
+                        {profileOptions.map(option => (
+                            <option key={option.key} value={option.key}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            )}
 
             {/* --- HOME SCREEN: The Alias Mapping Table --- */}
             {activeFileMetadata && (
@@ -358,7 +401,6 @@ export const Options = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {/* Execute the Reverse-Lookup O(1) rendering logic */}
                             {(() => {
                                 const colToAliasMap = getColumnToAliasMap(activeFileMetadata);
                                 
@@ -369,7 +411,6 @@ export const Options = () => {
                                         initialAlias={colToAliasMap[colName] || ""}
                                         fileId={activeFileMetadata.fileId}
                                         onAliasUpdated={() => {
-                                            // Re-fetch metadata to trigger a clean re-render
                                             db.file_metadata.get(activeFileMetadata.fileId).then(m => {
                                                 if(m) setActiveFileMetadata(m);
                                             });
@@ -387,14 +428,13 @@ export const Options = () => {
             {/* ============================================================================ */}
             {isModalOpen && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 999 }}>
-                    <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+                    <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
                         
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
                             <h2 style={{ margin: 0 }}>Import CSV</h2>
                             <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✖</button>
                         </div>
 
-                        {/* File Input */}
                         <div style={{ border: '2px dashed #ccc', padding: '20px', textAlign: 'center', borderRadius: '8px', marginBottom: '20px' }}>
                             {isParsing ? (
                                 <div style={{ color: '#2196F3', fontWeight: 'bold' }}>⚙️ Parsing document...</div>
@@ -403,7 +443,6 @@ export const Options = () => {
                             )}
                         </div>
 
-                        {/* Configuration Dropdowns (Only show if parsing is complete) */}
                         {columns.length > 0 && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '20px' }}>
                                 
@@ -435,7 +474,7 @@ export const Options = () => {
                                                 <option key={f.fileId} value={f.fileId}>
                                                     {f.source_name} ({formattedDate})
                                                 </option>
-                                            )
+                                            );
                                         })}
                                     </select>
                                     <small style={{ color: '#666' }}>Copy mappings from a previous file with matching column names.</small>
