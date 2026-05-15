@@ -1,5 +1,4 @@
-import { renderBubble, removeBubble, isInsideBubble } from './bubble';
-import type { FormElement } from './bubble';
+import { renderBubble, renderRecordBubble } from './bubble';
 
 console.log("Content Script Injected Successfully");
 
@@ -67,24 +66,52 @@ document.addEventListener('click', async (event: MouseEvent) => {
         // ROUTE B: "Record" Intent (Alt + Click)
         formElement.style.backgroundColor = "#fff3cd"  // yellow = "waiting for input"
         console.log(formElement.type)
-        const save_selector = () => {
-            const input_value = formElement.value;
-            chrome.runtime.sendMessage({
-                action: "SET_SELECTOR", 
-                selector: exactCoordinate, 
-                value: input_value,
-                type: formElement.type,
-                is_hardcoded: !input_value.startsWith("#")// TODO: fragile logic. Change when floating bubble is added
-            }, (response) => {
-                if (response && response.ok) {
-                    formElement.style.backgroundColor = "#00c851";  // green = "saved"
-                    console.log(`[RECORDED] ${exactCoordinate} -> ${input_value}`);
-                    setTimeout(() => formElement.style.backgroundColor = "", 1000);
-                }
-            });
-        }
+        // 1. Ask the Background Worker for the active alias mapping keys
+        chrome.runtime.sendMessage({ action: "GET_ALIASES" }, (response) => {
+            // Default to empty array if the background worker hasn't been set up yet
+            const aliases = (response && response.ok && response.payload) ? response.payload : [];
 
-        formElement.addEventListener('blur', save_selector, { once: true });
+            // 2. Render the Record Bubble
+            renderRecordBubble(
+                formElement, 
+                aliases, 
+                
+                // 3. The Unified Save Callback (Handles both hardcoded and alias selections)
+                (inputValue: string, isHardcoded: boolean) => {
+                    chrome.runtime.sendMessage({
+                        action: "SET_SELECTOR", 
+                        selector: exactCoordinate, 
+                        value: inputValue,
+                        type: formElement.type,
+                        is_hardcoded: isHardcoded // Passed strictly from the UI layer
+                    }, (setResponse) => {
+                        if (setResponse && setResponse.ok) {
+                            formElement.style.backgroundColor = "#00c851";  // green
+                            console.log(`[RECORDED] ${exactCoordinate} -> ${inputValue} (hardcoded: ${isHardcoded})`);
+                            setTimeout(() => formElement.style.backgroundColor = "", 1000);
+                        }
+                    });
+                }
+            );
+        });
+        // const save_selector = () => {
+        //     const input_value = formElement.value;
+        //     chrome.runtime.sendMessage({
+        //         action: "SET_SELECTOR", 
+        //         selector: exactCoordinate, 
+        //         value: input_value,
+        //         type: formElement.type,
+        //         is_hardcoded: !input_value.startsWith("#")// TODO: fragile logic. Change when floating bubble is added
+        //     }, (response) => {
+        //         if (response && response.ok) {
+        //             formElement.style.backgroundColor = "#00c851";  // green = "saved"
+        //             console.log(`[RECORDED] ${exactCoordinate} -> ${input_value}`);
+        //             setTimeout(() => formElement.style.backgroundColor = "", 1000);
+        //         }
+        //     });
+        // }
+
+        // formElement.addEventListener('blur', save_selector, { once: true });
         
         return;
     }
@@ -94,7 +121,7 @@ document.addEventListener('click', async (event: MouseEvent) => {
     // ROUTE C: "Autofill" Intent (Standard Click)
     const storageResult = await chrome.storage.local.get('activeProfileKey');
     const activeProfile = storageResult.activeProfileKey;
-    const profileHint = activeProfile || "Unknown Profile";
+    const profileHint = activeProfile || "No Active Profile";
 
     // 1. Create a reusable function to handle the API call
     const executeAutofill = (mode: "single" | "all") => {
