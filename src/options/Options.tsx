@@ -128,6 +128,9 @@ export const Options = () => {
                     key: row.primary_key_value,
                     label: row[metadata.descriptor_column_name]
                 }));
+
+                // Sort the array alphabetically by the label property
+                minimalOptions.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
                 
                 setProfileOptions(minimalOptions);
 
