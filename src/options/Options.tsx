@@ -385,6 +385,7 @@ export const Options = () => {
             {/* --- HEADER --- */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
                 <h1 style={{ margin: 0, color: '#333' }}>Contextual Autofill</h1>
+                <div>Shift+Click (Autofill) -- Alt+Click(Record) -- Alt+Shift+Click(Delete)</div>
                 <button 
                     onClick={() => setIsModalOpen(true)}
                     style={{ backgroundColor: '#2196F3', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}

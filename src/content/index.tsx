@@ -6,21 +6,45 @@ console.log("Content Script Injected Successfully");
 function getDomPath(el: HTMLElement | null): string {
     // Base cases
     if (!el) return '';
-    if (el.id) return `#${el.id}`; // Best case: IDs are universally unique indexing keys.
-    if (el.tagName === 'BODY') return 'BODY'; // We reached the top of the document.
+    if (el.tagName === 'BODY') return 'BODY';
 
+    const formElement = el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
+    // --- 1. THE BULLETPROOF ATTRIBUTES --- (identity)
+    
+    // Developer Test IDs (Highest Priority - Never changes)
+    const testId = el.getAttribute('data-testid') || el.getAttribute('data-cy');
+    if (testId) {
+        return `${el.tagName}[data-testid="${testId}"], ${el.tagName}[data-cy="${testId}"]`;
+    }
+
+    // Name Attribute (Backend linked)
+    if (formElement.name) {
+        const nameSelector = `${el.tagName}[name="${formElement.name}"]`;
+        // Only return if it is unique on this page, otherwise we might target the wrong input
+        if (document.querySelectorAll(nameSelector).length === 1) {
+            return nameSelector;
+        }
+    }
+
+    // Autocomplete Attribute (HTML Standard)
+    if (formElement.autocomplete && formElement.autocomplete !== "on" && formElement.autocomplete !== "off") {
+        const autoSelector = `${el.tagName}[autocomplete="${formElement.autocomplete}"]`;
+        if (document.querySelectorAll(autoSelector).length === 1) {
+            return autoSelector;
+        }
+    }
+
+    // --- 2. THE STRUCTURAL FALLBACK --- (locational coordinates)
+    // If the developers provided zero reliable metadata, map the exact DOM tree coordinates
     let nth = 1;
-    let sibling = el.previousElementSibling; // If element is the first one, it returns null.
+    let sibling = el.previousElementSibling;
 
-    // A while-loop to count siblings. 
-    // If the input is the 3rd <div> inside a form, this counts 1, 2, 3.
-    // tagName is all capital DIV, BODY etc.
     while (sibling) {
         if (sibling.tagName === el.tagName) nth++;
         sibling = sibling.previousElementSibling;
     }
-    // Recursion: It calls itself on the parent element, building the string backward.
-    // Result looks like: "BODY > DIV:nth-of-type(2) > FORM > INPUT:nth-of-type(1)"
+    
     return `${getDomPath(el.parentElement)} > ${el.tagName}:nth-of-type(${nth})`;
 }
 
@@ -31,11 +55,11 @@ document.addEventListener('click', async (event: MouseEvent) => {
     const tag = target.tagName;
     const SUPPORTED_TAGS = ['INPUT', 'SELECT', 'TEXTAREA'];
     
-    console.log(tag);
     if (!target || !SUPPORTED_TAGS.includes(tag)) return;
     // cast it strictly to input, textarea or select so we can access the .value property later.
     type FormElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
     const formElement = target as FormElement;
+    console.log(tag);
     console.log(formElement.type)
 
     const exactCoordinate = getDomPath(formElement);
@@ -98,83 +122,83 @@ document.addEventListener('click', async (event: MouseEvent) => {
         return;
     }
 
+    // ROUTE C: "Autofill" Intent (Shift+Click)
+    if (event.shiftKey) {
+        const storageResult = await chrome.storage.local.get(['activeProfileKey', 'convertTurkishChars']);
+        const activeProfile = storageResult.activeProfileKey;
+        const shouldConvertTurkish = storageResult.convertTurkishChars || false; // Default to false
+        const profileHint = activeProfile || "No Active Profile";
 
-
-    // ROUTE C: "Autofill" Intent (Standard Click)
-    const storageResult = await chrome.storage.local.get(['activeProfileKey', 'convertTurkishChars']);
-    const activeProfile = storageResult.activeProfileKey;
-    const shouldConvertTurkish = storageResult.convertTurkishChars || false; // Default to false
-    const profileHint = activeProfile || "No Active Profile";
-
-    const formatTurkishToGerman = (str: string): string => {
-        if (!str) return str;
-        const map: Record<string, string> = {
-            'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ş': 's', 'Ş': 'S'
+        const formatTurkishToGerman = (str: string): string => {
+            if (!str) return str;
+            const map: Record<string, string> = {
+                'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ş': 's', 'Ş': 'S'
+            };
+            // Regex looks for any character in the brackets and replaces it using the map
+            return str.replace(/[çÇğĞıİşŞ]/g, match => map[match]);
         };
-        // Regex looks for any character in the brackets and replaces it using the map
-        return str.replace(/[çÇğĞıİşŞ]/g, match => map[match]);
-    };
 
-    // 1. Create a reusable function to handle the API call
-    const executeAutofill = (mode: "single" | "all") => {
-        chrome.runtime.sendMessage({
-            action: "AUTOFILL",
-            param: mode, // <--- Now it dynamically uses 'single' or 'all'
-            selector: exactCoordinate,
-            profile: activeProfile 
-        }, (response) => {
-            console.log(`Autofill Response (${mode})`, response);
-            if (response && response.ok && response.payload) {
+        // 1. Create a reusable function to handle the API call
+        const executeAutofill = (mode: "single" | "all") => {
+            chrome.runtime.sendMessage({
+                action: "AUTOFILL",
+                param: mode, // <--- Now it dynamically uses 'single' or 'all'
+                selector: exactCoordinate,
+                profile: activeProfile 
+            }, (response) => {
+                console.log(`Autofill Response (${mode})`, response);
+                if (response && response.ok && response.payload) {
 
-                for (const {selector, value, is_hardcoded} of response.payload) {
-                    const input_field = document.querySelector(selector) as FormElement;
-                    if (input_field) {
+                    for (const {selector, value, is_hardcoded} of response.payload) {
+                        const input_field = document.querySelector(selector) as FormElement;
+                        if (input_field) {
 
-                        // --- THE FORMATTING LOGIC ---
-                        let finalValue = value;
-                        // ONLY format if the checkbox is checked AND it came from the database (not hardcoded)
-                        if (shouldConvertTurkish && is_hardcoded === false) {
-                            finalValue = formatTurkishToGerman(finalValue);
+                            // --- THE FORMATTING LOGIC ---
+                            let finalValue = value;
+                            // ONLY format if the checkbox is checked AND it came from the database (not hardcoded)
+                            if (shouldConvertTurkish && is_hardcoded === false) {
+                                finalValue = formatTurkishToGerman(finalValue);
+                            }
+                            input_field.value = finalValue;
+                            
+                            const eventName = input_field.tagName === 'INPUT' ? 'input' : 'change';
+                            input_field.dispatchEvent(new Event(eventName, { bubbles: true }));
+                            
+                            input_field.style.backgroundColor = "#b2dfdb"; 
+                            console.log(`[AUTOFILLED] Pulled "${value}"!`);
+                            setTimeout(() => input_field.style.backgroundColor = "", 1000);
                         }
-                        input_field.value = finalValue;
-                        
-                        const eventName = input_field.tagName === 'INPUT' ? 'input' : 'change';
-                        input_field.dispatchEvent(new Event(eventName, { bubbles: true }));
-                        
-                        input_field.style.backgroundColor = "#b2dfdb"; 
-                        console.log(`[AUTOFILLED] Pulled "${value}"!`);
-                        setTimeout(() => input_field.style.backgroundColor = "", 1000);
                     }
                 }
-            }
+            });
+        };
+
+        // render bubble only if selector is tracked
+        chrome.runtime.sendMessage({
+                action: "HAS_SELECTOR",
+                selector: exactCoordinate
+            }, (response) => {
+                    if (response && response.ok && response.has_selector) {
+                        // 2. Pass the helper function into the Bubble
+                        renderBubble(
+                            formElement, 
+                            profileHint, 
+                            
+                            // CALLBACK 1: onAutofillThis
+                            () => {
+                                console.log("Triggering Single Autofill...");
+                                executeAutofill("single");
+                            },
+
+                            // CALLBACK 2: onAutofillAll
+                            () => {
+                                console.log("Triggering Global Autofill...");
+                                executeAutofill("all");
+                            }
+                        );
+                    }
         });
-    };
-
-    // render bubble only if selector is tracked
-    chrome.runtime.sendMessage({
-            action: "HAS_SELECTOR",
-            selector: exactCoordinate
-        }, (response) => {
-                if (response && response.ok && response.has_selector) {
-                    // 2. Pass the helper function into the Bubble
-                    renderBubble(
-                        formElement, 
-                        profileHint, 
-                        
-                        // CALLBACK 1: onAutofillThis
-                        () => {
-                            console.log("Triggering Single Autofill...");
-                            executeAutofill("single");
-                        },
-
-                        // CALLBACK 2: onAutofillAll
-                        () => {
-                            console.log("Triggering Global Autofill...");
-                            executeAutofill("all");
-                        }
-                    );
-                }
-    });
+    }
     
 }, { capture: true });
 
