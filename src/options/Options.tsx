@@ -92,15 +92,26 @@ export const Options = () => {
     const [selectedDescriptorKey, setSelectedDescriptorKey] = useState("");
     const [selectedSyncFileId, setSelectedSyncFileId] = useState("");
 
+    // --- Formatting State ---
+    const [convertTurkishChars, setConvertTurkishChars] = useState(false);
+
     // ============================================================================
     // LIFECYCLE & DATA FETCHING
     // ============================================================================
     
     useEffect(() => {
         refreshFileList();
-        chrome.storage.local.get(["activeFileId"], (result) => {
+        
+        // 1. Ask Chrome's hard drive for our saved values
+        chrome.storage.local.get(["activeFileId", "convertTurkishChars"], (result) => {
+            
             if (result.activeFileId) {
                 setActiveFileId(result.activeFileId);
+            }
+            
+            // 2. If Chrome has a saved preference for the checkbox, push it into React's memory
+            if (result.convertTurkishChars !== undefined) {
+                setConvertTurkishChars(result.convertTurkishChars);
             }
         });
     }, []);
@@ -391,6 +402,29 @@ export const Options = () => {
                             </option>
                         ))}
                     </select>
+                </div>
+            )}
+
+            {/* --- Data Formatting Options --- */}
+            {activeFileMetadata && (
+                <div style={{ marginBottom: '30px', backgroundColor: '#fff', padding: '15px 20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input 
+                        type="checkbox" 
+                        id="turkish-toggle"
+                        // React reads from state to know if it should draw the checkmark
+                        checked={convertTurkishChars} 
+                        
+                        onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setConvertTurkishChars(isChecked);                            
+                            // Save to Chrome's hard drive (Persists after closing)
+                            chrome.storage.local.set({ convertTurkishChars: isChecked });
+                        }}
+                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                    />
+                    <label htmlFor="turkish-toggle" style={{ cursor: 'pointer', color: '#444', fontWeight: '500', userSelect: 'none' }}>
+                        Convert Turkish characters to German (ç ➔ c, ğ ➔ g, etc.)
+                    </label>
                 </div>
             )}
 

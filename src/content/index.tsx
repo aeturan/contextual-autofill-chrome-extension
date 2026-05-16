@@ -94,24 +94,6 @@ document.addEventListener('click', async (event: MouseEvent) => {
                 }
             );
         });
-        // const save_selector = () => {
-        //     const input_value = formElement.value;
-        //     chrome.runtime.sendMessage({
-        //         action: "SET_SELECTOR", 
-        //         selector: exactCoordinate, 
-        //         value: input_value,
-        //         type: formElement.type,
-        //         is_hardcoded: !input_value.startsWith("#")// TODO: fragile logic. Change when floating bubble is added
-        //     }, (response) => {
-        //         if (response && response.ok) {
-        //             formElement.style.backgroundColor = "#00c851";  // green = "saved"
-        //             console.log(`[RECORDED] ${exactCoordinate} -> ${input_value}`);
-        //             setTimeout(() => formElement.style.backgroundColor = "", 1000);
-        //         }
-        //     });
-        // }
-
-        // formElement.addEventListener('blur', save_selector, { once: true });
         
         return;
     }
@@ -119,9 +101,19 @@ document.addEventListener('click', async (event: MouseEvent) => {
 
 
     // ROUTE C: "Autofill" Intent (Standard Click)
-    const storageResult = await chrome.storage.local.get('activeProfileKey');
+    const storageResult = await chrome.storage.local.get(['activeProfileKey', 'convertTurkishChars']);
     const activeProfile = storageResult.activeProfileKey;
+    const shouldConvertTurkish = storageResult.convertTurkishChars || false; // Default to false
     const profileHint = activeProfile || "No Active Profile";
+
+    const formatTurkishToGerman = (str: string): string => {
+        if (!str) return str;
+        const map: Record<string, string> = {
+            'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I', 'ş': 's', 'Ş': 'S'
+        };
+        // Regex looks for any character in the brackets and replaces it using the map
+        return str.replace(/[çÇğĞıİşŞ]/g, match => map[match]);
+    };
 
     // 1. Create a reusable function to handle the API call
     const executeAutofill = (mode: "single" | "all") => {
@@ -133,10 +125,18 @@ document.addEventListener('click', async (event: MouseEvent) => {
         }, (response) => {
             console.log(`Autofill Response (${mode})`, response);
             if (response && response.ok && response.payload) {
-                for (const {selector, value} of response.payload) {
+
+                for (const {selector, value, is_hardcoded} of response.payload) {
                     const input_field = document.querySelector(selector) as FormElement;
                     if (input_field) {
-                        input_field.value = value;
+
+                        // --- THE FORMATTING LOGIC ---
+                        let finalValue = value;
+                        // ONLY format if the checkbox is checked AND it came from the database (not hardcoded)
+                        if (shouldConvertTurkish && is_hardcoded === false) {
+                            finalValue = formatTurkishToGerman(finalValue);
+                        }
+                        input_field.value = finalValue;
                         
                         const eventName = input_field.tagName === 'INPUT' ? 'input' : 'change';
                         input_field.dispatchEvent(new Event(eventName, { bubbles: true }));

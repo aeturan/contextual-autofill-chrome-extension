@@ -1,4 +1,3 @@
-import { uuidv7 } from 'uuidv7';
 import { db } from '../db';
 
 console.log("[Background Worker] Booting up Global NoSQL Engine...");
@@ -45,11 +44,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             if (request.param === 'single') {
                 const value = await getAutofill(request.selector);
-                sendResponse({ok: true, payload: [{selector: request.selector, value: value}]})
+                sendResponse({ok: true, payload: [{selector: request.selector, value: value, is_hardcoded: form.fields[request.selector].is_hardcoded}]})
             } else if (request.param === 'all') {
-                const selector_list: {selector: string; value: string | undefined}[] = [];
+                const selector_list: {selector: string; value: string | undefined; is_hardcoded: boolean}[] = [];
                 for (const selector of Object.keys(form.fields)) {
-                    selector_list.push({selector: selector, value: await getAutofill(selector)})
+                    selector_list.push({selector: selector, value: await getAutofill(selector), is_hardcoded: form.fields[selector].is_hardcoded})
                 }
                 console.log(selector_list)
                 sendResponse({ok: true, payload: selector_list})
