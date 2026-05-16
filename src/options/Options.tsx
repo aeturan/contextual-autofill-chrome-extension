@@ -95,6 +95,10 @@ export const Options = () => {
     // --- Formatting State ---
     const [convertTurkishChars, setConvertTurkishChars] = useState(false);
 
+    // --- Conflict Resolution State ---
+    const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
+    const [selectedTimestampKey, setSelectedTimestampKey] = useState("");
+
     // ============================================================================
     // LIFECYCLE & DATA FETCHING
     // ============================================================================
@@ -208,14 +212,11 @@ export const Options = () => {
     };
 
     // ============================================================================
-    // MODAL: Commit to Database
+    // MODAL: Check for Duplicates & Commit to Database
     // ============================================================================
-    const handleAddFile = async () => {
-        if (!selectedPrimaryKey || !selectedDescriptorKey) {
-            alert("Please select both a Profile Key and Descriptor.");
-            return;
-        }
-
+    
+    // The actual database write logic (extracted so both normal and resolved flows can use it)
+    const commitToDatabase = async (rowsToSave: Record<string, string>[]) => {
         const newFileId = `file_${crypto.randomUUID()}`;
         
         let startingAliases: Record<string, string> = {};
@@ -241,7 +242,7 @@ export const Options = () => {
             column_names: columns
         };
 
-        const newRows: FileRow[] = parsedRows.map(row => ({
+        const newRows: FileRow[] = rowsToSave.map(row => ({
             fileId: newFileId,
             primary_key_value: row[selectedPrimaryKey],
             ...row 
@@ -254,6 +255,7 @@ export const Options = () => {
             console.log(`[DB] Successfully imported ${uploadFilename}`);
             
             setIsModalOpen(false);
+            setIsConflictModalOpen(false); // Close conflict modal if open
             setParsedRows([]);
             setColumns([]);
             await refreshFileList();
@@ -264,6 +266,73 @@ export const Options = () => {
             alert("Failed to save file to database.");
         }
     };
+
+    // The handler when user clicks "Add File"
+    const handleAddFile = () => {
+        if (!selectedPrimaryKey || !selectedDescriptorKey) {
+            alert("Please select both a Profile Key and Descriptor.");
+            return;
+        }
+
+        // 1. Check for duplicates using a Set
+        const uniqueKeys = new Set();
+        let hasDuplicates = false;
+
+        for (const row of parsedRows) {
+            const pk = row[selectedPrimaryKey];
+            if (uniqueKeys.has(pk)) {
+                hasDuplicates = true;
+                break;
+            }
+            uniqueKeys.add(pk);
+        }
+
+        // 2. Traffic Control
+        if (hasDuplicates) {
+            // Open the conflict resolution popup
+            setSelectedTimestampKey(columns[0] || ""); // Default to first column
+            setIsConflictModalOpen(true);
+        } else {
+            // Safe to save immediately
+            commitToDatabase(parsedRows);
+        }
+    };
+
+    // The handler when user clicks "Solve Conflict"
+    const handleSolveConflict = () => {
+        if (!selectedTimestampKey) {
+            alert("Please select a timestamp column.");
+            return;
+        }
+
+        const deduplicatedMap = new Map<string, Record<string, string>>();
+
+        for (const row of parsedRows) {
+            const pk = row[selectedPrimaryKey];
+            
+            if (deduplicatedMap.has(pk)) {
+                // We found a duplicate, compare timestamps
+                const existingRow = deduplicatedMap.get(pk)!;
+                
+                // Parse dates safely. If invalid, defaults to NaN.
+                const existingTime = new Date(existingRow[selectedTimestampKey]).getTime();
+                const newTime = new Date(row[selectedTimestampKey]).getTime();
+
+                // Keep the new row if its time is strictly greater, or if the existing time is invalid
+                if (!isNaN(newTime) && (isNaN(existingTime) || newTime > existingTime)) {
+                    deduplicatedMap.set(pk, row);
+                }
+            } else {
+                // First time seeing this key, save it to the Map
+                deduplicatedMap.set(pk, row);
+            }
+        }
+
+        // Convert the Map values back to an array and save
+        const resolvedRows = Array.from(deduplicatedMap.values());
+        commitToDatabase(resolvedRows);
+    };
+
 
     // ============================================================================
     // HOME SCREEN: Deletion Logic
@@ -533,6 +602,49 @@ export const Options = () => {
                                 style={{ padding: '10px 20px', border: 'none', background: columns.length === 0 ? '#ccc' : '#4CAF50', color: 'white', borderRadius: '4px', cursor: columns.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
                             >
                                 Add File
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+            )}
+
+            {/* ============================================================================ */}
+            {/* MODAL OVERLAY: Conflict Resolution UI */}
+            {/* ============================================================================ */}
+            {isConflictModalOpen && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+                    <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '450px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+                        
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                            <h2 style={{ margin: 0, color: '#ff4444' }}>Duplicates Detected</h2>
+                            <button onClick={() => setIsConflictModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#666' }}>✖</button>
+                        </div>
+
+                        <p style={{ color: '#555', marginBottom: '20px', lineHeight: '1.5' }}>
+                            We found multiple rows with the same Profile Key. 
+                        </p>
+
+                        <div style={{ backgroundColor: '#fff3cd', border: '1px solid #ffeeba', padding: '15px', borderRadius: '6px', marginBottom: '25px' }}>
+                            <h4 style={{ margin: '0 0 10px 0', color: '#856404' }}>Conflict Resolution: Take the latest row only</h4>
+                            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', color: '#856404' }}>Choose Timestamp Column</label>
+                            <select 
+                                value={selectedTimestampKey} 
+                                onChange={(e) => setSelectedTimestampKey(e.target.value)} 
+                                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                            >
+                                <option value="" disabled>Select column...</option>
+                                {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                            <button onClick={() => setIsConflictModalOpen(false)} style={{ padding: '10px 20px', border: '1px solid #ccc', background: 'white', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                            <button 
+                                onClick={handleSolveConflict} 
+                                style={{ padding: '10px 20px', border: 'none', background: '#ff4444', color: 'white', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                            >
+                                Solve Conflict & Import
                             </button>
                         </div>
 
