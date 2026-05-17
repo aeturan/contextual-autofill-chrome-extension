@@ -99,6 +99,9 @@ export const Options = () => {
     const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
     const [selectedTimestampKey, setSelectedTimestampKey] = useState("");
 
+    // --- Split Configuration State ---
+    const [splits, setSplits] = useState<{column: string, delimiter: string}[]>([]);
+
     // ============================================================================
     // LIFECYCLE & DATA FETCHING
     // ============================================================================
@@ -215,16 +218,52 @@ export const Options = () => {
     // MODAL: Check for Duplicates & Commit to Database
     // ============================================================================
     
-    // The actual database write logic (extracted so both normal and resolved flows can use it)
     const commitToDatabase = async (rowsToSave: Record<string, string>[]) => {
         const newFileId = `file_${crypto.randomUUID()}`;
         
+        // --- 1. PROCESS SPLITS IN MEMORY ---
+        let finalColumns = [...columns];
+        let processedRows = rowsToSave.map(row => ({ ...row })); // Clone rows to avoid mutating original state
+
+        splits.forEach(split => {
+            if (!split.column || !split.delimiter) return; // Skip empty configurations
+
+            let maxChunks = 0;
+            
+            // Apply splits to every row
+            processedRows.forEach(row => {
+                // 1. Trim the entire string FIRST to kill leading/trailing spaces
+                const val = (row[split.column] || "").trim(); 
+                
+                // 2. Split, then filter out empty strings (kills double-spaces)
+                const chunks = val.split(split.delimiter).filter(chunk => chunk !== "");
+                
+                if (chunks.length > maxChunks) maxChunks = chunks.length;
+                
+                // Add the new columns to this row (e.g., "Full Name (1)", "Full Name (2)")
+                chunks.forEach((chunk, index) => {
+                    const newColName = `${split.column} (${index + 1})`;
+                    row[newColName] = chunk.trim(); // Extra safety trim
+                });
+            });
+
+            // Register the newly discovered column names globally
+            for (let i = 1; i <= maxChunks; i++) {
+                const newColName = `${split.column} (${i})`;
+                if (!finalColumns.includes(newColName)) {
+                    finalColumns.push(newColName);
+                }
+            }
+        });
+
+        // --- 2. BUILD DATABASE OBJECTS ---
         let startingAliases: Record<string, string> = {};
         if (selectedSyncFileId) {
             const syncSource = await db.file_metadata.get(selectedSyncFileId);
             if (syncSource) {
                 for (const [alias, columnName] of Object.entries(syncSource.alias2column)) {
-                    if (columns.includes(columnName)) {
+                    // Use finalColumns so we can sync previously split columns too!
+                    if (finalColumns.includes(columnName)) { 
                         startingAliases[alias] = columnName;
                     }
                 }
@@ -239,15 +278,16 @@ export const Options = () => {
             primary_column_name: selectedPrimaryKey,
             descriptor_column_name: selectedDescriptorKey,
             alias2column: startingAliases,
-            column_names: columns
+            column_names: finalColumns // Use the expanded column list
         };
 
-        const newRows: FileRow[] = rowsToSave.map(row => ({
+        const newRows: FileRow[] = processedRows.map(row => ({
             fileId: newFileId,
             primary_key_value: row[selectedPrimaryKey],
             ...row 
         }));
 
+        // --- 3. SAVE ---
         try {
             await db.file_metadata.add(newMetadata);
             await db.file_rows.bulkAdd(newRows);
@@ -255,9 +295,10 @@ export const Options = () => {
             console.log(`[DB] Successfully imported ${uploadFilename}`);
             
             setIsModalOpen(false);
-            setIsConflictModalOpen(false); // Close conflict modal if open
+            setIsConflictModalOpen(false); 
             setParsedRows([]);
             setColumns([]);
+            setSplits([]); // Reset splits for next upload
             await refreshFileList();
             setActiveFileId(newFileId); 
 
@@ -266,7 +307,7 @@ export const Options = () => {
             alert("Failed to save file to database.");
         }
     };
-
+    
     // The handler when user clicks "Add File"
     const handleAddFile = () => {
         if (!selectedPrimaryKey || !selectedDescriptorKey) {
@@ -592,6 +633,61 @@ export const Options = () => {
                                     <small style={{ color: '#666' }}>Copy mappings from a previous file with matching column names.</small>
                                 </div>
 
+                                {/* --- SPLIT COLUMNS UI --- */}
+                                    <div style={{ marginTop: '10px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
+                                        <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '10px' }}>Split Columns (Optional)</label>
+                                        
+                                        {splits.map((split, index) => (
+                                            <div key={index} style={{ display: 'flex', gap: '10px', marginBottom: '10px', width: '100%', alignItems: 'center' }}>
+                                                <select 
+                                                    value={split.column} 
+                                                    onChange={(e) => {
+                                                        const newSplits = [...splits];
+                                                        newSplits[index].column = e.target.value;
+                                                        setSplits(newSplits);
+                                                    }}
+                                                    // NEW: flex: 2 (takes more space), minWidth: 0 (forces it to stay inside modal)
+                                                    style={{ flex: '2 1 0', minWidth: 0, padding: '8px', borderRadius: '4px', border: '1px solid #ccc', textOverflow: 'ellipsis' }}
+                                                >
+                                                    <option value="" disabled>Select column...</option>
+                                                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                                                </select>
+                                                
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="Delimiter (e.g. ',', '-' or ' ')" 
+                                                    value={split.delimiter}
+                                                    onChange={(e) => {
+                                                        const newSplits = [...splits];
+                                                        newSplits[index].delimiter = e.target.value;
+                                                        setSplits(newSplits);
+                                                    }}
+                                                    // NEW: flex: 1 (takes less space), minWidth: 0
+                                                    style={{ flex: '1 1 0', minWidth: 0, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                                />
+                                                
+                                                <button 
+                                                    onClick={() => {
+                                                        // This safely purges the row from React state. No zombies!
+                                                        const newSplits = splits.filter((_, i) => i !== index);
+                                                        setSplits(newSplits);
+                                                    }}
+                                                    title="Delete Split"
+                                                    // NEW: flex: '0 0 auto' (prevents button from stretching or shrinking)
+                                                    style={{ flex: '0 0 auto', padding: '8px 12px', border: 'none', background: '#ff5252', color: 'white', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                                                >
+                                                    ✖
+                                                </button>
+                                            </div>
+                                        ))}
+                                        
+                                        <button 
+                                            onClick={() => setSplits([...splits, { column: "", delimiter: "" }])}
+                                            style={{ padding: '8px 15px', border: '1px dashed #2196F3', color: '#2196F3', background: 'transparent', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', width: '100%' }}
+                                        >
+                                            + Add Split
+                                        </button>
+                                    </div>
                             </div>
                         )}
 
