@@ -16,6 +16,7 @@ export interface FileMetadata {
     descriptor_column_name: string;
     alias2column: Record<string, string>;  // { alias: column, ... }
     column_names: string[];  // including the primary_column_name
+    column_splits?: { column: string, delimiter: string }[]; 
 }
 
 export interface Form {

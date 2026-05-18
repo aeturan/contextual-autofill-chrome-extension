@@ -55,12 +55,14 @@ document.addEventListener('click', async (event: MouseEvent) => {
     const tag = target.tagName;
     const SUPPORTED_TAGS = ['INPUT', 'SELECT', 'TEXTAREA'];
     
-    if (!target || !SUPPORTED_TAGS.includes(tag)) return;
+    if (!target || !SUPPORTED_TAGS.includes(tag)) {
+        console.log('🚫 Unsupported Field Clicked:', { tag: tag });
+        return;
+    }
     // cast it strictly to input, textarea or select so we can access the .value property later.
     type FormElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
     const formElement = target as FormElement;
-    console.log(tag);
-    console.log(formElement.type)
+    console.log('📥 Supported Field Clicked:', { tag: tag, type: formElement.type });
 
     const exactCoordinate = getDomPath(formElement);
 

@@ -101,6 +101,7 @@ export const Options = () => {
 
     // --- Split Configuration State ---
     const [splits, setSplits] = useState<{column: string, delimiter: string}[]>([]);
+    const [selectedSyncSplitsFileId, setSelectedSyncSplitsFileId] = useState("");
 
     // ============================================================================
     // LIFECYCLE & DATA FETCHING
@@ -278,7 +279,8 @@ export const Options = () => {
             primary_column_name: selectedPrimaryKey,
             descriptor_column_name: selectedDescriptorKey,
             alias2column: startingAliases,
-            column_names: finalColumns // Use the expanded column list
+            column_names: finalColumns, // Use the expanded column list
+            column_splits: splits
         };
 
         const newRows: FileRow[] = processedRows.map(row => ({
@@ -632,6 +634,44 @@ export const Options = () => {
                                     </select>
                                     <small style={{ color: '#666' }}>Copy mappings from a previous file with matching column names.</small>
                                 </div>
+
+                                {/* --- SYNC SPLITS UI --- */}
+                                <div style={{ marginTop: '10px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
+                                    <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Sync Splits (Optional)</label>
+                                    <select 
+                                        value={selectedSyncSplitsFileId} 
+                                        onChange={async (e) => {
+                                            const fileId = e.target.value;
+                                            setSelectedSyncSplitsFileId(fileId);
+                                            
+                                            if (!fileId) return;
+
+                                            const syncSource = await db.file_metadata.get(fileId);
+                                            if (syncSource && syncSource.column_splits) {
+                                                // Guardrail: Only import splits if the column exists in the current CSV
+                                                const applicableSplits = syncSource.column_splits.filter(split => 
+                                                    columns.includes(split.column)
+                                                );
+                                                setSplits(applicableSplits);
+                                            } else {
+                                                setSplits([]); // Clear if the old file had no splits
+                                            }
+                                        }} 
+                                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                    >
+                                        <option value="">Do not sync splits</option>
+                                        {sortedFiles.map(f => {
+                                            const formattedDate = new Date(f.created_at).toLocaleString();
+                                            return (
+                                                <option key={f.fileId} value={f.fileId}>
+                                                    {f.source_name} ({formattedDate})
+                                                </option>
+                                            );
+                                        })}
+                                    </select>
+                                    <small style={{ color: '#666' }}>Copy column splitting rules from a previous file.</small>
+                                </div>
+                                {/* --------------------------- */}
 
                                 {/* --- SPLIT COLUMNS UI --- */}
                                     <div style={{ marginTop: '10px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
