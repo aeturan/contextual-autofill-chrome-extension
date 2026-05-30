@@ -23,3 +23,9 @@ Furthermore, there is a built-in conflict resolution (Last Write Wins) option fo
 * *Alt+Click*: Starts recording
 * *Shift+Click*: Autofill
 * *Shift+Alt+Click*: Delete tracking
+
+### Technical Notes
+* Used IndexedDB (via Dexie) for storing imported files into 3 different collections: *FileRow*, *FileMetadata* and *Form*. First two are for storing data on the uploaded file and the last one is to track recordings on each website.
+* Used Local Storage for keeping track of current settings like active customer, active uploaded file and enabled pre-processing options.
+
+-> You can inspect these databases by checking right-click > Inspect > Application Tab. Check the Local storage under "Extension storage" and note that IndexedDB will only be visible if you do right-click > Inspect on the settings page since it lives in a separate Chrome process and therefore your data is sandboxed away from webpage code.
