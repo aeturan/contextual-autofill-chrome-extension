@@ -1,73 +1,25 @@
-# React + TypeScript + Vite
+# Speed Up Filling Same Forms for Multiple Clients on any Website
+... or you can use it for personal purposes, such as quickly filling out booking forms when you're racing to secure a limited number of available seats.
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Unlike Autofill services on MacOS or Chrome which supports a static template of supported fields like username, address, etc., this extension can be used to record any input field without the limitations.
 
-Currently, two official plugins are available:
+Note that there is no auto-detection of input fields. Therefore, this tool is useful if you are filling the same form on a website repeatedly for multiple customers.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### Usage
+1. `npm run build` will create `dist` folder.
+2. Open Chrome. Go to Manage Extensions
+3. Activate Developer Mode.
+4. Click "Load Unpacked" and load `dist`.
+5. Enable the extension.
 
-## React Compiler
+You can either start recording input fields with static values ...
+or if you really want to benefit from the automation capabilities then click on three dots next to extension and go to "Options". Load a csv file with your customer data and create aliases for any column you want. Next time you do *Alt+Click* to record a field, just click on record symbol and choose the alias to automatically fetch the data of a specific customer.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+We support some pre-processing options like splitting strings and adjusting german characters. 
+Furthermore, there is a built-in conflict resolution (Last Write Wins) option for rows with same ID if you choose to provide a column with timestamp data.
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### Key Combinations
+-> Click on an input field...
+* *Alt+Click*: Starts recording
+* *Shift+Click*: Autofill
+* *Shift+Alt+Click*: Delete tracking
