@@ -1,7 +1,7 @@
 # Speed Up Filling Same Forms for Multiple Clients on any Website
 ... or you can use it for personal purposes, such as quickly filling out booking forms when you're racing to secure a limited number of available seats.
 
-Unlike Autofill services on MacOS or Chrome which supports a static template of supported fields like username, address, etc., this extension can be used to record any input field without the limitations.
+Unlike Autofill services on MacOS or Chrome which support a static template of supported fields like username, address, etc., this extension can be used to record any input field without the limitations.
 
 Note that there is no auto-detection of input fields. Therefore, this tool is useful if you are filling the same form on a website repeatedly for multiple customers.
 
